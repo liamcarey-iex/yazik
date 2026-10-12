@@ -1,6 +1,6 @@
 # Yazik
 
-Yazik is a personal Android Russian practice app built with Kotlin and Jetpack Compose. It has guided beginner lessons, free conversation, typed and tap-to-speak turns, locally saved chat history, and a small on-device progress counter.
+Yazik is a personal Android Russian and Japanese practice app built with Kotlin and Jetpack Compose. It has guided beginner lessons, free conversation, typed and tap-to-speak turns, locally saved chat history, and separate on-device progress for each language.
 
 ## Requirements
 
@@ -20,7 +20,7 @@ The project uses Android Gradle Plugin 8.13.2 and Gradle 8.13. Open the project 
 
 ## First use
 
-Open **Settings**, enter your API key, and save it. Start a guided lesson or free conversation. Type a message or tap the microphone to record one turn; tap the stop icon to send it. The transcript and reply are saved locally. Use **Listen** on an assistant reply to request speech audio.
+Choose Russian or Japanese on first launch; you can switch languages from the home screen later. Open **Settings**, enter your API key, and save it. Start a guided lesson or free conversation. Type a message or tap the microphone to record one turn; tap the stop icon to send it. The transcript and reply are saved locally. Use **Listen** on an assistant reply to request speech audio.
 
 Text practice uses `gpt-6-luna`; voice input uses OpenAI transcription, and reply audio uses OpenAI speech generation. API usage is billed to the API account attached to the key. Audio usage is billed separately from normal text tokens. The app does not include a backend, sign-in, cloud sync, or built-in spending cap.
 
@@ -28,4 +28,4 @@ Text practice uses `gpt-6-luna`; voice input uses OpenAI transcription, and repl
 
 The key is entered by the user at runtime, encrypted with AES-GCM using a key held in Android Keystore, and is not embedded in the APK or written to logs. Conversations and progress are stored in the app's local Room database. Raw microphone recordings are placed in app cache and deleted after transcription is attempted.
 
-An API key used by a client app can still be extracted from a compromised device. This design is for personal use on your own phone; don't distribute an APK containing your key. Set spending limits on your OpenAI API account and revoke the key if the phone is lost. OpenAI's text-to-speech voices are currently optimized for English, so check Russian pronunciation quality for your own learning needs.
+An API key used by a client app can still be extracted from a compromised device. This design is for personal use on your own phone; don't distribute an APK containing your key. Set spending limits on your OpenAI API account and revoke the key if the phone is lost. OpenAI's text-to-speech voices are currently optimized for English, so check Russian and Japanese pronunciation quality for your own learning needs.

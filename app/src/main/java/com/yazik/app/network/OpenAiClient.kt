@@ -3,6 +3,7 @@ package com.yazik.app.network
 import android.content.Context
 import com.yazik.app.data.PracticeMessage
 import com.yazik.app.data.PracticeMode
+import com.yazik.app.data.PracticeLanguage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -25,9 +26,9 @@ class OpenAiClient(context: Context, private val getApiKey: () -> String?) {
         .writeTimeout(90, TimeUnit.SECONDS)
         .build()
 
-    suspend fun reply(mode: PracticeMode, history: List<PracticeMessage>): String = withContext(Dispatchers.IO) {
+    suspend fun reply(mode: PracticeMode, language: PracticeLanguage, history: List<PracticeMessage>): String = withContext(Dispatchers.IO) {
         val messages = JSONArray().apply {
-            put(JSONObject().put("role", "system").put("content", tutorInstructions(mode)))
+            put(JSONObject().put("role", "system").put("content", tutorInstructions(mode, language)))
             history.takeLast(24).forEach { message ->
                 put(JSONObject().put("role", message.role).put("content", message.content))
             }
@@ -50,11 +51,11 @@ class OpenAiClient(context: Context, private val getApiKey: () -> String?) {
             ?: throw IOException("OpenAI returned an empty reply.")
     }
 
-    suspend fun transcribe(recording: File): String = withContext(Dispatchers.IO) {
+    suspend fun transcribe(recording: File, language: PracticeLanguage): String = withContext(Dispatchers.IO) {
         val requestBody = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("model", TRANSCRIPTION_MODEL)
-            .addFormDataPart("languages[]", "ru")
+            .addFormDataPart("languages[]", language.code)
             .addFormDataPart("response_format", "json")
             .addFormDataPart("file", "speech.m4a", recording.asRequestBody("audio/mp4".toMediaType()))
             .build()
@@ -108,17 +109,17 @@ class OpenAiClient(context: Context, private val getApiKey: () -> String?) {
         return IOException(message)
     }
 
-    private fun tutorInstructions(mode: PracticeMode): String {
+    private fun tutorInstructions(mode: PracticeMode, language: PracticeLanguage): String {
         val style = if (mode == PracticeMode.GUIDED) {
-            "Run a short structured beginner lesson. Start with one useful phrase, explain it simply, then ask one small question. " +
+            "Run a short structured beginner ${language.englishName} lesson. Start with one useful phrase, explain it simply, then ask one small question. " +
                 "Adapt to the learner's answers and end with a quick recap when appropriate."
         } else {
-            "Have a relaxed Russian conversation about the learner's chosen topic. Keep turns short and invite them to respond."
+            "Have a relaxed ${language.englishName} conversation about the learner's chosen topic. Keep turns short and invite them to respond."
         }
         return """
-            You are Yazik, a patient Russian tutor for an absolute beginner whose explanation language is English.
+            You are Yazik, a patient ${language.englishName} tutor for an absolute beginner whose explanation language is English.
             $style
-            Use simple Russian, with English help where useful. After each learner message, first show a natural corrected Russian version if there is an error, then give one brief English explanation and continue the conversation with one question or prompt. If the learner's Russian is already correct, say so briefly. Do not overwhelm them with grammar terminology. Use Cyrillic and optionally show transliteration only when it helps pronunciation.
+            Use simple ${language.englishName}, with English help where useful. After each learner message, first show a natural corrected version in ${language.englishName} if there is an error, then give one brief English explanation and continue the conversation with one question or prompt. If the learner's ${language.englishName} is already correct, say so briefly. Do not overwhelm them with grammar terminology. ${if (language == PracticeLanguage.RUSSIAN) "Use Cyrillic and optionally show transliteration only when it helps pronunciation." else "Use Japanese writing (kana and kanji); optionally include romaji only when it helps pronunciation."}
         """.trimIndent()
     }
 

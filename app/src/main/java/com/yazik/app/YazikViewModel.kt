@@ -4,10 +4,13 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.yazik.app.data.Conversation
 import com.yazik.app.data.LearningProgress
 import com.yazik.app.data.PracticeMessage
 import com.yazik.app.data.PracticeMode
+import com.yazik.app.data.PracticeLanguage
 import com.yazik.app.data.YazikDatabase
 import com.yazik.app.network.OpenAiClient
 import com.yazik.app.security.ApiKeyVault
@@ -21,10 +24,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class AppScreen { HOME, CHAT, SETTINGS }
+enum class AppScreen { LANGUAGE, HOME, CHAT, SETTINGS }
 
 data class YazikUiState(
-    val screen: AppScreen = AppScreen.HOME,
+    val screen: AppScreen = AppScreen.LANGUAGE,
+    val language: PracticeLanguage = PracticeLanguage.RUSSIAN,
+    val languageChosen: Boolean = false,
     val hasApiKey: Boolean = false,
     val mode: PracticeMode = PracticeMode.GUIDED,
     val conversationId: String? = null,
@@ -36,21 +41,45 @@ data class YazikUiState(
 )
 
 class YazikViewModel(application: Application) : AndroidViewModel(application) {
-    private val database = Room.databaseBuilder(application, YazikDatabase::class.java, "yazik.db").build()
+    private val preferences = application.getSharedPreferences("yazik_preferences", 0)
+    private val savedLanguage = preferences.getString("language", null)
+    private val database = Room.databaseBuilder(application, YazikDatabase::class.java, "yazik.db")
+        .addMigrations(MIGRATION_1_2)
+        .build()
     private val dao = database.practiceDao()
     private val keyVault = ApiKeyVault(application)
     private val api = OpenAiClient(application) { keyVault.get() }
 
-    private val _state = MutableStateFlow(YazikUiState(hasApiKey = keyVault.hasKey()))
+    private val _state = MutableStateFlow(
+        YazikUiState(
+            screen = if (savedLanguage == null) AppScreen.LANGUAGE else AppScreen.HOME,
+            language = PracticeLanguage.fromCode(savedLanguage),
+            languageChosen = savedLanguage != null,
+            hasApiKey = keyVault.hasKey()
+        )
+    )
     val state = _state.asStateFlow()
 
     init {
         viewModelScope.launch {
             combine(dao.observeConversations(), dao.observeProgress()) { conversations, progress ->
-                conversations to (progress ?: LearningProgress())
+                conversations to progress
             }.collect { (conversations, progress) ->
-                _state.update { it.copy(conversations = conversations, progress = progress) }
+                _state.update { state ->
+                    state.copy(conversations = conversations, progress = progress.firstOrNull { it.language == state.language.code } ?: LearningProgress(language = state.language.code))
+                }
             }
+        }
+    }
+
+    fun chooseLanguage(language: PracticeLanguage) {
+        preferences.edit().putString("language", language.code).apply()
+        _state.update {
+            it.copy(language = language, languageChosen = true, screen = AppScreen.HOME, progress = LearningProgress(language = language.code), error = null)
+        }
+        viewModelScope.launch {
+            val progress = dao.getProgress(language.code) ?: LearningProgress(language = language.code)
+            _state.update { if (it.language == language) it.copy(progress = progress) else it }
         }
     }
 
@@ -77,20 +106,22 @@ class YazikViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch {
+            val language = _state.value.language
             val now = System.currentTimeMillis()
             val conversation = Conversation(
                 id = UUID.randomUUID().toString(),
                 mode = mode.name,
-                title = if (mode == PracticeMode.GUIDED) "Russian beginner lesson" else "Free Russian practice",
+                title = if (mode == PracticeMode.GUIDED) "${language.englishName} beginner lesson" else "Free ${language.englishName} practice",
                 startedAt = now,
-                updatedAt = now
+                updatedAt = now,
+                language = language.code
             )
             dao.saveConversation(conversation)
             _state.update {
                 it.copy(screen = AppScreen.CHAT, mode = mode, conversationId = conversation.id, messages = emptyList(), error = null)
             }
             if (mode == PracticeMode.GUIDED) {
-                sendText("Let's begin a beginner Russian lesson.", showUserMessage = false)
+                sendText("Let's begin a beginner ${language.englishName} lesson.", showUserMessage = false)
             }
         }
     }
@@ -102,11 +133,13 @@ class YazikViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     screen = AppScreen.CHAT,
                     mode = runCatching { PracticeMode.valueOf(conversation.mode) }.getOrDefault(PracticeMode.GUIDED),
+                    language = PracticeLanguage.fromCode(conversation.language),
                     conversationId = conversation.id,
                     messages = messages,
                     error = null
                 )
             }
+            preferences.edit().putString("language", PracticeLanguage.fromCode(conversation.language).code).apply()
         }
     }
 
@@ -124,12 +157,12 @@ class YazikViewModel(application: Application) : AndroidViewModel(application) {
                             id = "opening-prompt",
                             conversationId = conversationId,
                             role = "user",
-                            content = "Start the first short beginner Russian lesson now.",
+                            content = "Start the first short beginner ${_state.value.language.englishName} lesson now.",
                             createdAt = System.currentTimeMillis()
                         )
                     )
                 }
-                val answer = api.reply(_state.value.mode, history)
+                val answer = api.reply(_state.value.mode, _state.value.language, history)
                 saveMessage(conversationId, "assistant", answer)
                 bumpTurnCount()
             } catch (error: Exception) {
@@ -146,9 +179,10 @@ class YazikViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _state.update { it.copy(busy = true, error = null) }
             try {
-                val recognizedText = api.transcribe(recording)
+                val language = _state.value.language
+                val recognizedText = api.transcribe(recording, language)
                 saveMessage(conversationId, "user", recognizedText)
-                val answer = api.reply(_state.value.mode, dao.getMessages(conversationId))
+                val answer = api.reply(_state.value.mode, language, dao.getMessages(conversationId))
                 saveMessage(conversationId, "assistant", answer)
                 bumpTurnCount()
             } catch (error: Exception) {
@@ -172,7 +206,8 @@ class YazikViewModel(application: Application) : AndroidViewModel(application) {
             if (id != null) {
                 val changed = dao.completeConversation(id, System.currentTimeMillis())
                 if (changed > 0 && _state.value.mode == PracticeMode.GUIDED) {
-                    val old = dao.getProgress() ?: LearningProgress()
+                    val language = _state.value.language
+                    val old = dao.getProgress(language.code) ?: LearningProgress(language = language.code)
                     dao.saveProgress(old.copy(completedLessons = old.completedLessons + 1))
                 }
             }
@@ -195,12 +230,25 @@ class YazikViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun bumpTurnCount() = withContext(Dispatchers.IO) {
-        val progress = dao.getProgress() ?: LearningProgress()
+        val language = _state.value.language
+        val progress = dao.getProgress(language.code) ?: LearningProgress(language = language.code)
         dao.saveProgress(progress.copy(practiceTurns = progress.practiceTurns + 1, lastActivityAt = System.currentTimeMillis()))
     }
 
     override fun onCleared() {
         database.close()
         super.onCleared()
+    }
+
+    companion object {
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN language TEXT NOT NULL DEFAULT 'ru'")
+                db.execSQL("CREATE TABLE learning_progress_new (language TEXT NOT NULL PRIMARY KEY, completedLessons INTEGER NOT NULL, practiceTurns INTEGER NOT NULL, lastActivityAt INTEGER)")
+                db.execSQL("INSERT INTO learning_progress_new (language, completedLessons, practiceTurns, lastActivityAt) SELECT 'ru', completedLessons, practiceTurns, lastActivityAt FROM learning_progress WHERE id = 1")
+                db.execSQL("DROP TABLE learning_progress")
+                db.execSQL("ALTER TABLE learning_progress_new RENAME TO learning_progress")
+            }
+        }
     }
 }

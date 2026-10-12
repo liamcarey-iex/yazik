@@ -87,6 +87,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yazik.app.data.Conversation
 import com.yazik.app.data.PracticeMessage
 import com.yazik.app.data.PracticeMode
+import com.yazik.app.data.PracticeLanguage
 import java.io.File
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -142,9 +143,15 @@ private fun YazikApp(viewModel: YazikViewModel) {
         snackbarHost = { SnackbarHost(snackbar) }
     ) { padding ->
         when (state.screen) {
+            AppScreen.LANGUAGE -> LanguageSelectionScreen(
+                onSelect = viewModel::chooseLanguage,
+                modifier = Modifier.padding(padding)
+            )
             AppScreen.HOME -> HomeScreen(
                 state = state,
+                language = state.language,
                 onSettings = viewModel::openSettings,
+                onLanguageChange = viewModel::chooseLanguage,
                 onStart = viewModel::startConversation,
                 onResume = viewModel::resumeConversation,
                 modifier = Modifier.padding(padding)
@@ -172,7 +179,9 @@ private fun YazikApp(viewModel: YazikViewModel) {
 @Composable
 private fun HomeScreen(
     state: YazikUiState,
+    language: PracticeLanguage,
     onSettings: () -> Unit,
+    onLanguageChange: (PracticeLanguage) -> Unit,
     onStart: (PracticeMode) -> Unit,
     onResume: (Conversation) -> Unit,
     modifier: Modifier = Modifier
@@ -192,8 +201,18 @@ private fun HomeScreen(
             }
         }
 
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PracticeLanguage.entries.forEach { option ->
+                if (option == language) {
+                    Button(onClick = { onLanguageChange(option) }, modifier = Modifier.weight(1f)) { Text("${option.nativeName} · ${option.englishName}") }
+                } else {
+                    OutlinedButton(onClick = { onLanguageChange(option) }, modifier = Modifier.weight(1f)) { Text("${option.nativeName} · ${option.englishName}") }
+                }
+            }
+        }
+
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("A little Russian,\nevery day.", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, color = Ink)
+            Text("A little ${language.englishName},\nevery day.", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, color = Ink)
             Text("Friendly practice, at your pace.", style = MaterialTheme.typography.bodyLarge, color = Muted)
         }
 
@@ -228,25 +247,47 @@ private fun HomeScreen(
             )
             PracticeModeCard(
                 title = "Free conversation",
-                description = "Pick a topic and chat in simple Russian, with help when you need it.",
+                description = "Pick a topic and chat in simple ${language.englishName}, with help when you need it.",
                 eyebrow = "YOUR TOPIC, YOUR PACE",
                 onClick = { onStart(PracticeMode.FREE) }
             )
         }
 
-        if (state.conversations.isNotEmpty()) {
+        val languageConversations = state.conversations.filter { it.language == language.code }
+        if (languageConversations.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Default.History, contentDescription = null, tint = Leaf, modifier = Modifier.size(19.dp))
                     Text("Recent practice", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 }
-                state.conversations.take(8).forEach { conversation ->
+                languageConversations.take(8).forEach { conversation ->
                     HistoryRow(conversation = conversation, onClick = { onResume(conversation) })
                 }
             }
         }
 
         Text("Powered by OpenAI · API usage is billed to your API account", style = MaterialTheme.typography.labelSmall, color = Muted, modifier = Modifier.padding(bottom = 20.dp))
+    }
+}
+
+@Composable
+private fun LanguageSelectionScreen(onSelect: (PracticeLanguage) -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxSize().padding(horizontal = 22.dp), verticalArrangement = Arrangement.Center) {
+        BrandMark()
+        Spacer(Modifier.height(30.dp))
+        Text("What would you like to learn?", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, color = Ink)
+        Spacer(Modifier.height(8.dp))
+        Text("Choose a language to get started. You can switch any time.", style = MaterialTheme.typography.bodyLarge, color = Muted)
+        Spacer(Modifier.height(24.dp))
+        PracticeLanguage.entries.forEach { language ->
+            PracticeModeCard(
+                title = "${language.nativeName} · ${language.englishName}",
+                description = "Guided lessons and free conversation",
+                eyebrow = language.nativeName,
+                onClick = { onSelect(language) }
+            )
+            Spacer(Modifier.height(12.dp))
+        }
     }
 }
 
@@ -466,7 +507,7 @@ private fun ChatScreen(
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (state.busy) CircularProgressIndicator(color = Leaf)
-                    else Text("Say привет or type a message to begin.", color = Muted)
+                    else Text(if (state.language == PracticeLanguage.RUSSIAN) "Say привет or type a message to begin." else "Say こんにちは or type a message to begin.", color = Muted)
                 }
             }
         } else {
@@ -506,7 +547,7 @@ private fun ChatScreen(
                 value = draft,
                 onValueChange = { draft = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Write in Russian or English…") },
+                placeholder = { Text("Write in ${state.language.englishName} or English…") },
                 maxLines = 4,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { if (!state.busy && draft.isNotBlank()) { onSend(draft); draft = "" } })
@@ -522,7 +563,7 @@ private fun ChatScreen(
                 enabled = !state.busy,
                 modifier = Modifier.size(48.dp).background(if (recording) Coral else PaleGreen, CircleShape)
             ) {
-                Icon(if (recording) Icons.Default.Stop else Icons.Default.Mic, contentDescription = if (recording) "Stop recording and send" else "Record a Russian reply", tint = if (recording) Color.White else Leaf)
+                Icon(if (recording) Icons.Default.Stop else Icons.Default.Mic, contentDescription = if (recording) "Stop recording and send" else "Record a ${state.language.englishName} reply", tint = if (recording) Color.White else Leaf)
             }
             IconButton(
                 onClick = { onSend(draft); draft = "" },
