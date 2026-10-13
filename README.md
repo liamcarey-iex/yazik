@@ -2,6 +2,16 @@
 
 Yazik is a personal Android Russian and Japanese practice app built with Kotlin and Jetpack Compose. It has guided beginner lessons, free conversation, typed and tap-to-speak turns, locally saved chat history, and separate on-device progress for each language.
 
+## Screenshots
+
+### Free conversation
+
+![Russian free conversation screen](docs/images/russian-free-conversation.png)
+
+### Home screen and language switcher
+
+![Home screen with Russian selected and Japanese available](docs/images/home-language-switcher.png)
+
 ## Requirements
 
 - Android Studio with Android SDK Platform 36 and Java 17.
